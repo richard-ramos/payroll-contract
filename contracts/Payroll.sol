@@ -3,6 +3,7 @@ pragma solidity ^0.4.18;
 import "./PayrollInterface.sol";
 import "./Ownable.sol";
 import "./Oracleizable.sol";
+import "./DetailedERC20.sol";
 
 contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
@@ -27,6 +28,10 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     uint256 public lastIdx;
     
     uint256 totalYearlyEmployeeEURSalary;
+    
+    
+    mapping(address => bool) allowedTokenCatalog;
+    mapping(address => uint256) allowedTokensRate;
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
@@ -48,7 +53,14 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         require(accountAddress != address(0x0));
         require(employeeCatalog[accountAddress] == 0);
             
-        // TODO research what is allowedTokens going to be used for?
+        mapping(address => uint256) exchangeRates;
+        for(uint256 i = 0; i < allowedTokens.length; i++){
+            // Assume that a token is allowed if it's in allowedMapping
+            if(!allowedTokenCatalog[allowedTokens[i]]){
+                revert();
+            }
+        }
+        
         lastIdx = employees.push(Employee(accountAddress, allowedTokens, initialYearlyEURSalary) );
         employeeCatalog[accountAddress] = lastIdx;
         employeeCount++;
@@ -58,6 +70,25 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         totalYearlyEmployeeEURSalary += initialYearlyEURSalary;
         
         NewEmployee(lastIdx, accountAddress, allowedTokens, initialYearlyEURSalary);
+    }
+    
+    function isTokenAllowed(address token)
+        public
+        constant
+        returns(bool) {
+        return allowedTokenCatalog[token];
+    }
+    
+    function updateTokenAllowance(address token, bool allowed)
+        public
+        onlyOwner
+    {
+        allowedTokenCatalog[token] = allowed;
+        
+        if(!allowed){
+            // TODO send balance to owner
+        }
+        
     }
     
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
@@ -96,14 +127,15 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         payable 
         onlyOwner 
         public {
-        // nothing to see here ...
+        // TODO ask why are we accepting eth if the payment is in tokens.
     }
     
-    // TODO research about the functionality. Should this be a way to kill the contract?
-    //      if that's the case, should I do something with the tokens?
     function scapeHatch() 
         onlyOwner 
         public {
+            
+        // TODO send allowed tokens to owner;
+            
         LogScapeHatch();
         selfdestruct(owner);
     }
@@ -144,6 +176,13 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     // TODO
     function calculatePayrollRunway() constant returns (uint256); // Days until the contract can run out of funds 
 
-    
+    function setExchangeRate(address token, uint256 EURExchangeRate)
+        public 
+        onlyOracle
+    {
+        
+        DetailedERC20 erc20token = DetailedERC20(token);
+        allowedTokensRate[token] =  EURExchangeRate * erc20token.decimals();
+    }
     
 }
