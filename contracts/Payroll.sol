@@ -18,6 +18,8 @@ contract Payroll is PayrollInterface, Ownable {
     mapping(address => uint256) employeeCatalog;
     uint256 public employeeCount;
     uint256 public lastIdx;
+    
+    uint256 totalYearlyEmployeeEURSalary;
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
@@ -44,6 +46,10 @@ contract Payroll is PayrollInterface, Ownable {
         employeeCatalog[accountAddress] = lastIdx;
         employeeCount++;
         
+        // NOTE To save gas, instead of calculating the monthly salary in calculatePayrollBurnrate
+        //      I simply update this variable when there's a change related to salaries
+        totalYearlyEmployeeEURSalary += initialYearlyEURSalary;
+        
         NewEmployee(lastIdx, accountAddress, allowedTokens, initialYearlyEURSalary);
     }
     
@@ -57,6 +63,11 @@ contract Payroll is PayrollInterface, Ownable {
         require(yearlyEURSalary != oldYearlyEURSalary);
         
         employees[employeeId].yearlyEURSalary = yearlyEURSalary;
+        
+        // Removing the old salary and adding new
+        totalYearlyEmployeeEURSalary -= oldYearlyEURSalary;
+        totalYearlyEmployeeEURSalary += yearlyEURSalary;
+        
         EmployeeSalaryChange(employeeId, oldYearlyEURSalary,  yearlyEURSalary);
     }
 
@@ -64,6 +75,8 @@ contract Payroll is PayrollInterface, Ownable {
         onlyOwner 
         employeeExists(employeeId)
         public {
+            
+        totalYearlyEmployeeEURSalary -= employees[employeeId].yearlyEURSalary;
             
         delete employeeCatalog[employees[employeeId].account];
         delete employees[employeeId];
@@ -117,16 +130,8 @@ contract Payroll is PayrollInterface, Ownable {
         constant 
         public 
         returns (uint256) {
-        // Hopefully the number of employees is low enough to not cause an out of gas error
-        uint256 eurAmount = 0;
-        address emptyAddress = address(0x0);
-        
-        for(uint256 i = 0; i < lastIdx - 1; i++){
-            if(employees[i].account != emptyAddress)
-                eurAmount += employees[i].yearlyEURSalary; // TODO safemath
-        }
-        
-        return eurAmount / 12;
+       
+        return totalYearlyEmployeeEURSalary / 12;
     } 
     
     // TODO
