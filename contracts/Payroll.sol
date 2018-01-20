@@ -2,11 +2,18 @@ pragma solidity ^0.4.18;
 
 import "./PayrollInterface.sol";
 import "./Ownable.sol";
+import "./Oracleizable.sol";
 
-contract Payroll is PayrollInterface, Ownable {
+contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
     // NOTE
     // Most functions on PayrollInterface are marked as public. I'd prefer to use external to save gas since we're not making internal calls.
+    
+    function Payroll(address _oracle)
+        Ownable()
+        Oracleizable(_oracle){
+        // Nothing to see here ...
+    }
 
     struct Employee {
       address account;
