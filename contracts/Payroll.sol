@@ -4,6 +4,7 @@ import "./PayrollInterface.sol";
 import "./Ownable.sol";
 import "./Oracleizable.sol";
 import "./DetailedERC20.sol";
+import "./DateTimeAPI.sol";
 
 contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
@@ -21,6 +22,9 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
       address account;
       address[] tokens;
       uint256 yearlyEURSalary;
+      
+      uint lastAllocationTimestamp;
+      uint lastPayday;
     }
 
     Employee[] public employees;
@@ -33,7 +37,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
     mapping(address => bool) allowedTokenCatalog;
     mapping(address => uint256) allowedTokensRate;
-    address[] tokens;
+    address[] tokenList;
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
@@ -62,7 +66,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
             }
         }
         
-        lastIdx = employees.push(Employee(accountAddress, allowedTokens, initialYearlyEURSalary) );
+        lastIdx = employees.push(Employee(accountAddress, allowedTokens, initialYearlyEURSalary, 0, 0) );
         employeeCatalog[accountAddress] = lastIdx;
         employeeCount++;
         
@@ -87,7 +91,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         NewTokenAllowanceSet(token, allowed);
         
         allowedTokenCatalog[token] = allowed;
-        tokens.push(token);
+        tokenList.push(token);
     }
     
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
@@ -138,8 +142,8 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         LogScapeHatch();
             
         // Send tokens to owner;
-        for(uint256 i = 0; i < tokens.length; i++){
-            DetailedERC20 erc20Token = DetailedERC20(tokens[i]);
+        for(uint256 i = 0; i < tokenList.length; i++){
+            DetailedERC20 erc20Token = DetailedERC20(tokenList[i]);
             erc20Token.transfer(owner, erc20Token.balanceOf(this));    
         }
         
@@ -189,6 +193,67 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
             
             
     }
+    
+    
+    modifier onlyEmployees() {
+        require(employeeCatalog[msg.sender] > 0);
+        _;
+    }
+    
+    // only callable once every 6 months 
+    function determineAllocation(address[] tokens, uint256[] distribution)
+        onlyEmployees
+        public
+    {
+        Employee storage e = employees[employeeCatalog[msg.sender]];
+        
+        require(now > addMonths(e.lastAllocationTimestamp, 6));
+        
+        e.lastAllocationTimestamp = now;
+        
+        // TODO check that 'tokens' is in the allowed token list 
+        // TODO probably distribution is percentage based, so check that distribution is equals to 100
+    } 
+    
+    
+    function payday()
+        onlyEmployees
+        public
+    {
+        // only callable once a month 
+        Employee storage e = employees[employeeCatalog[msg.sender]];
+        require(now > addMonths(e.lastPayday, 6));
+        
+        e.lastPayday = now;
+        
+        // TODO calculate distribution
+        
+    }
+    
+    function addMonths(uint ts, uint8 months)
+        constant
+        internal
+        returns(uint)
+    {
+        assert(months <= 12);
+            
+        DateTimeAPI dt = DateTimeAPI(address(0x1a6184CD4C5Bea62B0116de7962EE7315B7bcBce));
+        uint16 y = dt.getYear(ts);
+        uint8 m = dt.getMonth(ts) + months;
+        
+        if(m > 12){
+            y++;
+            m -= 12;
+        } 
+
+        return dt.toTimestamp(y, m,  dt.getDay(ts), dt.getHour(ts), dt.getMinute(ts), dt.getSecond(ts));
+    }
+    
+    
+    
+    
+    
+    
 
     function setExchangeRate(address token, uint256 EURExchangeRate)
         public 
