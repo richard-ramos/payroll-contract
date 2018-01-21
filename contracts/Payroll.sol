@@ -40,7 +40,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     address[] validTokenList;
     mapping(address => bool) validTokenCatalog;
     mapping(address => uint256) validTokensRate;
-  
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
@@ -85,7 +84,10 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         NewEmployee(lastIdx, accountAddress, allowedTokens, initialYearlyEURSalary);
     }
     
-    function isTokenAllowed(address[] employeeTokens, address token)
+	/*
+	 * Check whether the token of a employee are in the allowed list of tokens
+	 */
+    function areTokensAllowed(address[] employeeTokens)
         public
         constant
         returns(bool) {
@@ -95,6 +97,9 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
        return true;
     }
     
+	/*
+	 * Check if the token is in the list of tokens handled by the contract
+	 */
     function isTokenValid(address token)
         public
         constant
@@ -111,7 +116,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         validTokenCatalog[token] = allowed;
         validTokenList.push(token);
     }
-    
     
     function updateTokenAllowance(uint256 employeeId, address[] tokenList)
         public
@@ -158,7 +162,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         payable 
         onlyOwner 
         public {
-        // TODO ask why are we accepting eth if the payment is in tokens.
+        // TODO ask why are we accepting eth if the payment is in tokens.?
     }
     
     // Is this a typo?
@@ -210,15 +214,51 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return totalYearlyEmployeeEURSalary / 12;
     } 
     
-    // TODO
+    // TODO test
     function calculatePayrollRunway() 
         constant 
         public
         returns (uint256){
-        // Days until the contract can run out of funds 
+        // Days until the contract can run out of funds   
+        
+        uint256 i;
+        uint256 j;
+        uint256 k;
+        
+        uint256[] memory contractBalanceEUR = new uint256[](validTokenList.length);
+        uint256[] memory amountNeededEUR = new uint256[](validTokenList.length);
+        
+        
+        // O(N) operations - improve.
+        
+        for (i = 0; i < validTokenList.length; i++){
+            DetailedERC20 currentToken = DetailedERC20(validTokenList[i]);
+            // Get balances for tokens in EUR
+            contractBalanceEUR[i] = currentToken.balanceOf(this) / validTokensRate[validTokenList[i]];
             
-            
-            
+            // Calculate needed tokens for a year
+            for(j = 0; j < employees.length; j++){
+                if(employees[j].account != address(0x0)){
+                    Employee storage e = employees[j];
+                    // Each employee may have a different list of tokens
+                    for(k = 0; k < e.tokens.length; k++){
+                        if(e.tokens[k] == validTokenList[i]){
+                            amountNeededEUR[i] += (e.yearlyEURSalary * e.distribution[k] / 100) / validTokensRate[e.tokens[k]];
+                        }
+                    }
+                }
+            }
+        }
+        
+        uint256 maxDays = contractBalanceEUR[0] / amountNeededEUR[0] * 365; // Max days we can pay for first token
+        for (i = 1; i < validTokenList.length; i++){
+            uint256 currTokenDays = contractBalanceEUR[i] / amountNeededEUR[i] * 365;
+            if(currTokenDays < maxDays){
+                maxDays = currTokenDays;
+            }
+        }
+        
+        return maxDays;
     }
     
     modifier onlyEmployees() {
@@ -226,6 +266,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         _;
     }
     
+    // TODO test
     // only callable once every 6 months 
     function determineAllocation(address[] tokens, uint256[] distribution)
         onlyEmployees
@@ -241,10 +282,8 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         uint256 i;
         
         // Check that 'tokens' is in the allowed token list 
-        for(i = 0; i < tokens.length; i++){
-            if(!isTokenAllowed(e.tokens, tokens[i])) revert();
-        }
-        
+        if(!areTokensAllowed(e.tokens)) revert();
+
         uint256 distTotal = 0;
         for(i = 0; i < distribution.length; i++){
             distTotal += distribution[i];
@@ -259,7 +298,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         AllocationSet(msg.sender, tokens, distribution);
     } 
     
-    
+    // TODO test
     function payday()
         onlyEmployees
         public
@@ -314,7 +353,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         public 
         onlyOracle
     {
-        
         DetailedERC20 erc20token = DetailedERC20(token);
         validTokensRate[token] =  EURExchangeRate * erc20token.decimals();
     }
