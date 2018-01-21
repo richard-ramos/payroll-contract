@@ -102,8 +102,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return validTokenCatalog[token];
     }
     
-    
-       
     function updateContractValidTokens(address token, bool allowed)
         public
         onlyOwner
@@ -268,14 +266,29 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     {
         // only callable once a month 
         Employee storage e = employees[employeeCatalog[msg.sender]];
-        require(now > addMonths(e.lastPayday, 6));
+        
+        // Once a month
+        require(now > addMonths(e.lastPayday, 1));
+        
+        // Checking that the employee has a valid distribution
+        uint256 distTotal = 0;
+        for(i = 0; i < e.distribution.length; i++){
+            distTotal += e.distribution[i];
+        }
+        // Distribution is percentage based, so check that distribution is equals to 100
+        if(distTotal < 100) revert();
         
         e.lastPayday = now;
         
-        // TODO check if employee has distribution set
-        
-        // TODO calculate distribution
-        
+        for (uint256 i = 0; i < e.tokens.length; i++) {
+            uint256 tokenRate = validTokensRate[e.tokens[i]];
+            uint256 eurProportionByToken = (e.yearlyEURSalary / 12) * e.distribution[i] / 100;
+            
+            uint256 eurToToken = eurProportionByToken / tokenRate;            
+            
+            DetailedERC20 erc20token = DetailedERC20(e.tokens[i]);
+            erc20token.transfer(msg.sender, eurToToken);
+        }
     }
     
     function addMonths(uint ts, uint8 months)
