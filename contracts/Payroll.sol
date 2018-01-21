@@ -11,6 +11,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     // Most functions on PayrollInterface are marked as public. I'd prefer to use external to save gas since we're not making internal calls.
     
     function Payroll(address _oracle)
+        public
         Ownable()
         Oracleizable(_oracle){
         // Nothing to see here ...
@@ -32,19 +33,20 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
     mapping(address => bool) allowedTokenCatalog;
     mapping(address => uint256) allowedTokensRate;
+    address[] tokens;
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
     event EmployeeRemoved(uint256 employeeId);
     event LogScapeHatch();
-    
+    event NewTokenAllowanceSet(address token, bool allowed);
     
     modifier employeeExists(uint256 employeeId) {
         require(employees[employeeId].account != address(0x0));
         _;
     }
     
-    // NOTE: I'd suggest to modify the interdace in order for this function to return the employee id
+    // NOTE: I'd suggest to modify the interface in order for this function to return the employee id
     //       (you could access the ID with the NewEmployee event, tho)
     function addEmployee(address accountAddress, address[] allowedTokens, uint256 initialYearlyEURSalary) 
         onlyOwner 
@@ -53,7 +55,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         require(accountAddress != address(0x0));
         require(employeeCatalog[accountAddress] == 0);
             
-        mapping(address => uint256) exchangeRates;
         for(uint256 i = 0; i < allowedTokens.length; i++){
             // Assume that a token is allowed if it's in allowedMapping
             if(!allowedTokenCatalog[allowedTokens[i]]){
@@ -83,12 +84,10 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         public
         onlyOwner
     {
+        NewTokenAllowanceSet(token, allowed);
+        
         allowedTokenCatalog[token] = allowed;
-        
-        if(!allowed){
-            // TODO send balance to owner
-        }
-        
+        tokens.push(token);
     }
     
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
@@ -130,13 +129,20 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         // TODO ask why are we accepting eth if the payment is in tokens.
     }
     
+    
+    // Is this a typo?
     function scapeHatch() 
         onlyOwner 
         public {
-            
-        // TODO send allowed tokens to owner;
-            
+        
         LogScapeHatch();
+            
+        // Send tokens to owner;
+        for(uint256 i = 0; i < tokens.length; i++){
+            DetailedERC20 erc20Token = DetailedERC20(tokens[i]);
+            erc20Token.transfer(owner, erc20Token.balanceOf(this));    
+        }
+        
         selfdestruct(owner);
     }
     
@@ -174,7 +180,15 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     } 
     
     // TODO
-    function calculatePayrollRunway() constant returns (uint256); // Days until the contract can run out of funds 
+    function calculatePayrollRunway() 
+        constant 
+        public
+        returns (uint256){
+        // Days until the contract can run out of funds 
+            
+            
+            
+    }
 
     function setExchangeRate(address token, uint256 EURExchangeRate)
         public 
