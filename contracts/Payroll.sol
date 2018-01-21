@@ -20,7 +20,10 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
 
     struct Employee {
       address account;
+      
       address[] tokens;
+      uint256[] distribution;
+      
       uint256 yearlyEURSalary;
       
       uint lastAllocationTimestamp;
@@ -34,16 +37,19 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     
     uint256 totalYearlyEmployeeEURSalary;
     
-    
-    mapping(address => bool) allowedTokenCatalog;
-    mapping(address => uint256) allowedTokensRate;
-    address[] tokenList;
+    address[] validTokenList;
+    mapping(address => bool) validTokenCatalog;
+    mapping(address => uint256) validTokensRate;
+  
 
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
     event EmployeeRemoved(uint256 employeeId);
     event LogScapeHatch();
-    event NewTokenAllowanceSet(address token, bool allowed);
+    
+    event NewValidTokensSet(address token, bool allowed);
+    event NewTokenAllowanceSet(uint256 employeeId, address[] tokenList);
+    event AllocationSet(address employee, address[] tokens, uint256[] distribution);
     
     modifier employeeExists(uint256 employeeId) {
         require(employees[employeeId].account != address(0x0));
@@ -61,12 +67,14 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
             
         for(uint256 i = 0; i < allowedTokens.length; i++){
             // Assume that a token is allowed if it's in allowedMapping
-            if(!allowedTokenCatalog[allowedTokens[i]]){
+            if(!validTokenCatalog[allowedTokens[i]]){
                 revert();
             }
         }
         
-        lastIdx = employees.push(Employee(accountAddress, allowedTokens, initialYearlyEURSalary, 0, 0) );
+        uint256[] memory emptyDistribution = new uint256[](1);
+        
+        lastIdx = employees.push(Employee(accountAddress, allowedTokens, emptyDistribution, initialYearlyEURSalary, 0, 0) );
         employeeCatalog[accountAddress] = lastIdx;
         employeeCount++;
         
@@ -77,21 +85,43 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         NewEmployee(lastIdx, accountAddress, allowedTokens, initialYearlyEURSalary);
     }
     
-    function isTokenAllowed(address token)
+    function isTokenAllowed(address[] employeeTokens, address token)
         public
         constant
         returns(bool) {
-        return allowedTokenCatalog[token];
+        for(uint256 i = 0; i < employeeTokens.length; i++){
+            if(!isTokenValid(employeeTokens[i])) return false;
+        }
+       return true;
     }
     
-    function updateTokenAllowance(address token, bool allowed)
+    function isTokenValid(address token)
+        public
+        constant
+        returns(bool) {
+        return validTokenCatalog[token];
+    }
+    
+    
+       
+    function updateContractValidTokens(address token, bool allowed)
         public
         onlyOwner
     {
-        NewTokenAllowanceSet(token, allowed);
+        NewValidTokensSet(token, allowed);
         
-        allowedTokenCatalog[token] = allowed;
-        tokenList.push(token);
+        validTokenCatalog[token] = allowed;
+        validTokenList.push(token);
+    }
+    
+    
+    function updateTokenAllowance(uint256 employeeId, address[] tokenList)
+        public
+        onlyOwner
+        employeeExists(employeeId)
+    {
+        employees[employeeId].tokens = tokenList;
+        NewTokenAllowanceSet(employeeId, tokenList);
     }
     
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
@@ -133,7 +163,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         // TODO ask why are we accepting eth if the payment is in tokens.
     }
     
-    
     // Is this a typo?
     function scapeHatch() 
         onlyOwner 
@@ -142,14 +171,14 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         LogScapeHatch();
             
         // Send tokens to owner;
-        for(uint256 i = 0; i < tokenList.length; i++){
-            DetailedERC20 erc20Token = DetailedERC20(tokenList[i]);
+        for(uint256 i = 0; i < validTokenList.length; i++){
+            DetailedERC20 erc20Token = DetailedERC20(validTokenList[i]);
             erc20Token.transfer(owner, erc20Token.balanceOf(this));    
         }
         
         selfdestruct(owner);
     }
-    
+
     function getEmployeeCount() 
         constant 
         public
@@ -194,7 +223,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
             
     }
     
-    
     modifier onlyEmployees() {
         require(employeeCatalog[msg.sender] > 0);
         _;
@@ -205,14 +233,32 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         onlyEmployees
         public
     {
+        // distribution and tokens should be equal length
+        require(distribution.length == tokens.length);
+
         Employee storage e = employees[employeeCatalog[msg.sender]];
         
         require(now > addMonths(e.lastAllocationTimestamp, 6));
         
-        e.lastAllocationTimestamp = now;
+        uint256 i;
         
-        // TODO check that 'tokens' is in the allowed token list 
-        // TODO probably distribution is percentage based, so check that distribution is equals to 100
+        // Check that 'tokens' is in the allowed token list 
+        for(i = 0; i < tokens.length; i++){
+            if(!isTokenAllowed(e.tokens, tokens[i])) revert();
+        }
+        
+        uint256 distTotal = 0;
+        for(i = 0; i < distribution.length; i++){
+            distTotal += distribution[i];
+        }
+        
+        // Distribution is percentage based, so check that distribution is equals to 100
+        if(distTotal < 100) revert();
+        
+        e.lastAllocationTimestamp = now;
+        e.distribution = distribution;
+        
+        AllocationSet(msg.sender, tokens, distribution);
     } 
     
     
@@ -225,6 +271,8 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         require(now > addMonths(e.lastPayday, 6));
         
         e.lastPayday = now;
+        
+        // TODO check if employee has distribution set
         
         // TODO calculate distribution
         
@@ -249,19 +297,13 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return dt.toTimestamp(y, m,  dt.getDay(ts), dt.getHour(ts), dt.getMinute(ts), dt.getSecond(ts));
     }
     
-    
-    
-    
-    
-    
-
     function setExchangeRate(address token, uint256 EURExchangeRate)
         public 
         onlyOracle
     {
         
         DetailedERC20 erc20token = DetailedERC20(token);
-        allowedTokensRate[token] =  EURExchangeRate * erc20token.decimals();
+        validTokensRate[token] =  EURExchangeRate * erc20token.decimals();
     }
     
 }
