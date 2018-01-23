@@ -2,15 +2,19 @@ pragma solidity ^0.4.18;
 
 import "./PayrollInterface.sol";
 import "./Ownable.sol";
+import "./Pausable.sol";
 import "./Oracleizable.sol";
 import "./DetailedERC20.sol";
 import "./DateTimeAPI.sol";
 
-contract Payroll is PayrollInterface, Ownable, Oracleizable {
+contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     
     // NOTE
     // Most functions on PayrollInterface are marked as public. I'd prefer to use external to save gas since we're not making internal calls.
     
+    /** @dev Payroll contract constructor
+      * @param _oracle Oracle address that will set the exchange rate
+      */
     function Payroll(address _oracle)
         public
         Ownable()
@@ -50,16 +54,26 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
     event NewTokenAllowanceSet(uint256 employeeId, address[] tokenList);
     event AllocationSet(address employee, address[] tokens, uint256[] distribution);
     
+    /** @dev Modifier to check wether and employee exists
+      * @param employeeId ID of the employee to verify
+      */
     modifier employeeExists(uint256 employeeId) {
         require(employees[employeeId].account != address(0x0));
         _;
     }
     
-    // NOTE: I'd suggest to modify the interface in order for this function to return the employee id
-    //       (you could access the ID with the NewEmployee event, tho)
+    
+    /** @dev Add employee. Can only be called by the owner of the contract
+      * @param accountAddress Employee eth account
+      * @param allowedTokens Array of the tokens addresses in which the employee will be paid
+      * @param initialYearlyEURSalary Yearly salary in EUR
+      */
     function addEmployee(address accountAddress, address[] allowedTokens, uint256 initialYearlyEURSalary) 
         onlyOwner 
         public {
+        
+        // NOTE: I'd suggest to modify the interface in order for this function to return the employee id
+        //       (you could access the ID with the NewEmployee event, tho)
         
         require(accountAddress != address(0x0));
         require(employeeCatalog[accountAddress] == 0);
@@ -84,9 +98,13 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         NewEmployee(lastIdx, accountAddress, allowedTokens, initialYearlyEURSalary);
     }
     
-	/*
-	 * Check whether the token of a employee are in the allowed list of tokens
-	 */
+
+	/** @dev Check whether the selected tokens of a employee are in the allowed list of tokens
+      * @param emplyeeTokens Array of token address
+      * @param allowedTokens Array of the tokens addresses in which the employee will be paid
+      * @param initialYearlyEURSalary Yearly salary in EUR
+      * @return Token allowed or not
+      */
     function areTokensAllowed(address[] employeeTokens)
         public
         constant
@@ -97,15 +115,20 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
        return true;
     }
     
-	/*
-	 * Check if the token is in the list of tokens handled by the contract
-	 */
+    
+	/** @dev Check if the token is in the list of tokens handled by the contract
+      * @param token Address of token to be verified
+      * @param allowedTokens Array of the tokens addresses in which the employee will be paid
+      * @param initialYearlyEURSalary Yearly salary in EUR
+      * @return Token valid or not
+      */
     function isTokenValid(address token)
         public
         constant
         returns(bool) {
         return validTokenCatalog[token];
     }
+    
     
     function updateContractValidTokens(address token, bool allowed)
         public
@@ -117,6 +140,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         validTokenList.push(token);
     }
     
+    
     function updateTokenAllowance(uint256 employeeId, address[] tokenList)
         public
         onlyOwner
@@ -125,6 +149,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         employees[employeeId].tokens = tokenList;
         NewTokenAllowanceSet(employeeId, tokenList);
     }
+    
     
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
         onlyOwner 
@@ -144,6 +169,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         EmployeeSalaryChange(employeeId, oldYearlyEURSalary,  yearlyEURSalary);
     }
 
+
     function removeEmployee(uint256 employeeId)
         onlyOwner 
         employeeExists(employeeId)
@@ -158,6 +184,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         EmployeeRemoved(employeeId);
     }
     
+    
     function addFunds() 
         payable 
         onlyOwner 
@@ -165,9 +192,11 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         // TODO ask why are we accepting eth if the payment is in tokens.?
     }
     
+    
     // Is this a typo?
     function scapeHatch() 
         onlyOwner 
+        onlyPaused
         public {
         
         LogScapeHatch();
@@ -181,12 +210,14 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         selfdestruct(owner);
     }
 
+
     function getEmployeeCount() 
         constant 
         public
         returns (uint256) {
         return employeeCount;
     }
+    
     
     // NOTE: this is returning an address... so, to return all important info I needed to add an additional function. 
     //       I could do it in this function but I'm not sure I'm allowed to change the interface definition in this 
@@ -198,6 +229,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return employees[employeeId].account;
     }
     
+    
     function getEmployeeInfo(uint256 employeeId)
         constant
         public returns(address employee, address[] allowedTokens, uint256 yearlyEURSalary) {
@@ -206,6 +238,9 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return (e.account, e.tokens, e.yearlyEURSalary);
     }
     
+    
+    /** @dev Monthly EUR amount spent in salaries
+      */
     function calculatePayrollBurnrate() 
         constant 
         public 
@@ -213,6 +248,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
        
         return totalYearlyEmployeeEURSalary / 12;
     } 
+    
     
     // TODO test
     function calculatePayrollRunway() 
@@ -261,15 +297,20 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return maxDays;
     }
     
+    
+    /** @dev Modifier to only allow function calls if the sender is a valid employee
+      */
     modifier onlyEmployees() {
         require(employeeCatalog[msg.sender] > 0);
         _;
     }
     
+    
     // TODO test
     // only callable once every 6 months 
     function determineAllocation(address[] tokens, uint256[] distribution)
         onlyEmployees
+        onlyUnpaused
         public
     {
         // distribution and tokens should be equal length
@@ -298,9 +339,11 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         AllocationSet(msg.sender, tokens, distribution);
     } 
     
+    
     // TODO test
     function payday()
         onlyEmployees
+        onlyUnpaused
         public
     {
         // only callable once a month 
@@ -330,6 +373,12 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         }
     }
     
+    
+    /** @dev Calculate date in N months
+      * @param ts Input timestamp
+      * @param months Number of months to add < 12
+      * @return New timestamp
+      */
     function addMonths(uint ts, uint8 months)
         constant
         internal
@@ -349,9 +398,15 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable {
         return dt.toTimestamp(y, m,  dt.getDay(ts), dt.getHour(ts), dt.getMinute(ts), dt.getSecond(ts));
     }
     
+    
+    /** @dev Set Exchange Rate for token. Only Oracle may call this function
+      * @param token Token that will have a exchange rate set
+      * @param EURExchangeRate Exchange Rate: 1 EUR -> N Tokens
+      */
     function setExchangeRate(address token, uint256 EURExchangeRate)
         public 
         onlyOracle
+        onlyUnpaused
     {
         DetailedERC20 erc20token = DetailedERC20(token);
         validTokensRate[token] =  EURExchangeRate * erc20token.decimals();
