@@ -7,10 +7,18 @@ import "./Oracleizable.sol";
 import "./DetailedERC20.sol";
 import "./DateTimeAPI.sol";
 
-contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
+contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable{
     
     // NOTE
-    // Most functions on PayrollInterface are marked as public. I'd prefer to use external to save gas since we're not making internal calls.
+    // Changed most functions on PayrollInterface to external to save gas since we're not making internal calls.
+    
+    // I noticed that we're allowing the contract to receive Ether in add funds. 
+    //   If we want to allow the employees to be paid in ETH there are two options:
+    //   a. We create a ERC20 token used to represent ETH, and use it to send the ether,
+    //   b. We asume that the address of this contract represents ETH. It is ugly because we'd need to 
+    //      add logic inside payday, calculatePayrollBurnrate, calculatePayrollRunway to handle this 
+    //   Both of these options require the oracle to be aware that ETH requires special handling
+    //   (maybe with an extra function to set the ETH-EUR exchange rate?)
     
     /** @dev Payroll contract constructor
       * @param _oracle Oracle address that will set the exchange rate
@@ -18,6 +26,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function Payroll(address _oracle)
         public
         Ownable()
+        Pausable(false)
         Oracleizable(_oracle){
         // Nothing to see here ...
     }
@@ -48,7 +57,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     event NewEmployee(uint256 idx, address account, address[] allowedTokens, uint256 yearlyEURSalary);
     event EmployeeSalaryChange(uint256 idx, uint256 oldYearlyEURSalary,  uint256 newYearlyEURSalary);
     event EmployeeRemoved(uint256 employeeId);
-    event LogScapeHatch();
+    event LogEscapeHatch();
     
     event NewValidTokensSet(address token, bool allowed);
     event NewTokenAllowanceSet(uint256 employeeId, address[] tokenList);
@@ -70,10 +79,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
       */
     function addEmployee(address accountAddress, address[] allowedTokens, uint256 initialYearlyEURSalary) 
         onlyOwner 
-        public {
-        
-        // NOTE: I'd suggest to modify the interface in order for this function to return the employee id
-        //       (you could access the ID with the NewEmployee event, tho)
+        external {
         
         require(accountAddress != address(0x0));
         require(employeeCatalog[accountAddress] == 0);
@@ -87,7 +93,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
         
         uint256[] memory emptyDistribution = new uint256[](1);
         
-        lastIdx = employees.push(Employee(accountAddress, allowedTokens, emptyDistribution, initialYearlyEURSalary, 0, 0) );
+        lastIdx = employees.push(Employee(accountAddress, allowedTokens, emptyDistribution, initialYearlyEURSalary, 0, 0) ) - 1;
         employeeCatalog[accountAddress] = lastIdx;
         employeeCount++;
         
@@ -100,9 +106,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     
 
 	/** @dev Check whether the selected tokens of a employee are in the allowed list of tokens
-      * @param emplyeeTokens Array of token address
-      * @param allowedTokens Array of the tokens addresses in which the employee will be paid
-      * @param initialYearlyEURSalary Yearly salary in EUR
+      * @param employeeTokens Array of token address
       * @return Token allowed or not
       */
     function areTokensAllowed(address[] employeeTokens)
@@ -118,8 +122,6 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     
 	/** @dev Check if the token is in the list of tokens handled by the contract
       * @param token Address of token to be verified
-      * @param allowedTokens Array of the tokens addresses in which the employee will be paid
-      * @param initialYearlyEURSalary Yearly salary in EUR
       * @return Token valid or not
       */
     function isTokenValid(address token)
@@ -131,7 +133,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     
     
     function updateContractValidTokens(address token, bool allowed)
-        public
+        external
         onlyOwner
     {
         NewValidTokensSet(token, allowed);
@@ -142,7 +144,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     
     
     function updateTokenAllowance(uint256 employeeId, address[] tokenList)
-        public
+        external
         onlyOwner
         employeeExists(employeeId)
     {
@@ -154,7 +156,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function setEmployeeSalary(uint256 employeeId, uint256 yearlyEURSalary) 
         onlyOwner 
         employeeExists(employeeId)
-        public {
+        external {
         
         uint256 oldYearlyEURSalary = employees[employeeId].yearlyEURSalary;
         
@@ -173,7 +175,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function removeEmployee(uint256 employeeId)
         onlyOwner 
         employeeExists(employeeId)
-        public {
+        external {
             
         totalYearlyEmployeeEURSalary -= employees[employeeId].yearlyEURSalary;
             
@@ -188,18 +190,17 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function addFunds() 
         payable 
         onlyOwner 
-        public {
-        // TODO ask why are we accepting eth if the payment is in tokens.?
+        external {
+        // Nothing to see here
     }
     
     
-    // Is this a typo?
-    function scapeHatch() 
+    function escapeHatch() 
         onlyOwner 
         onlyPaused
-        public {
+        external {
         
-        LogScapeHatch();
+        LogEscapeHatch();
             
         // Send tokens to owner;
         for(uint256 i = 0; i < validTokenList.length; i++){
@@ -213,27 +214,17 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
 
     function getEmployeeCount() 
         constant 
-        public
+        external
         returns (uint256) {
         return employeeCount;
     }
     
     
-    // NOTE: this is returning an address... so, to return all important info I needed to add an additional function. 
-    //       I could do it in this function but I'm not sure I'm allowed to change the interface definition in this 
-    //       code challenge
     function getEmployee(uint256 employeeId) 
         constant 
-        public returns (address employee){
+        external 
+        returns (address employee, address[] allowedTokens, uint256 yearlyEURSalary) {
         
-        return employees[employeeId].account;
-    }
-    
-    
-    function getEmployeeInfo(uint256 employeeId)
-        constant
-        public returns(address employee, address[] allowedTokens, uint256 yearlyEURSalary) {
-            
         Employee memory e = employees[employeeId];
         return (e.account, e.tokens, e.yearlyEURSalary);
     }
@@ -243,7 +234,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
       */
     function calculatePayrollBurnrate() 
         constant 
-        public 
+        external 
         returns (uint256) {
        
         return totalYearlyEmployeeEURSalary / 12;
@@ -253,7 +244,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     // TODO test
     function calculatePayrollRunway() 
         constant 
-        public
+        external
         returns (uint256){
         // Days until the contract can run out of funds   
         
@@ -311,7 +302,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function determineAllocation(address[] tokens, uint256[] distribution)
         onlyEmployees
         onlyUnpaused
-        public
+        external
     {
         // distribution and tokens should be equal length
         require(distribution.length == tokens.length);
@@ -344,7 +335,7 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
     function payday()
         onlyEmployees
         onlyUnpaused
-        public
+        external
     {
         // only callable once a month 
         Employee storage e = employees[employeeCatalog[msg.sender]];
@@ -404,12 +395,23 @@ contract Payroll is PayrollInterface, Ownable, Oracleizable, Pausable {
       * @param EURExchangeRate Exchange Rate: 1 EUR -> N Tokens
       */
     function setExchangeRate(address token, uint256 EURExchangeRate)
-        public 
+        external 
         onlyOracle
         onlyUnpaused
     {
         DetailedERC20 erc20token = DetailedERC20(token);
         validTokensRate[token] =  EURExchangeRate * erc20token.decimals();
+    }
+    
+    
+    
+    // Token Fallback function implemented as suggested by PayrollInterface
+    function tokenFallback(address _from, uint _value, bytes _data)
+        public {
+        if(!isTokenValid(msg.sender))
+            revert();
+        
+        // This is used to stop receiving unhandled tokens
     }
     
 }

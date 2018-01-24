@@ -4,6 +4,7 @@ import "./Ownable.sol";
 
 contract Pausable is Ownable {
 
+
 	bool internal paused;
 
     event LogPausedSet(address indexed sender, bool indexed newPausedState);
@@ -18,7 +19,8 @@ contract Pausable is Ownable {
 		_;
 	}
 
-	function Pausable(bool initialState){
+
+    function Pausable(bool initialState){
 		paused = initialState;
 	}
 
